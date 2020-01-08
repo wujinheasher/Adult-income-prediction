@@ -1,0 +1,247 @@
+---
+title: "Adult Income Predict"
+author: "Yun Wu"
+date: "1/8/2020"
+output: pdf_document
+
+---
+
+# Introduction
+
+The adult dataset is from the 1994 Census database. It is also known as “Census Income” dataset. this dataset can be found at http://files.grouplens.org/datasets/movielens/ml-10m.zip. This project is related to the course Data Science: Capstone from HarvardX's Data Science Professional Certificate. Thanks to Dr. Rafael Irizarry, I really learn something important to me.
+The income project is predicting adult income via variables such as age, education, race, workplace, etc. In this project, I have to clean and reduce the dimension first, then used several machine learning algorithm and compared the accuracy. the purpose is to get maximum possible accuracy in prediction.
+
+
+# preprocess the dataset
+
+The adult income dataset is automatically downloaded
+
+[adult income dataset] https://archive.ics.uci.edu/ml/datasets/adult
+
+[adult income dataset -file]https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data
+
+## Download the dataset
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyr)
+library(tidyverse)
+library(caret)
+library(magrittr)
+library(randomForest)
+options(digits = 6)
+
+dl <- tempfile()
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data", dl)
+adult_income <- read.table(dl, sep = ',', fill = F, strip.white = T) %>% set_colnames( 
+  c('age', 'workclass', 'fnlwgt', 'education', 'education_num', 'marital_status', 'occupation', 'relationship', 'race', 'sex', 'capital_gain', 'capital_loss', 'hours_per_week', 'native_country', 'income'))
+
+head(adult_income)
+```
+
+## Dimension reducing 
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+mean(adult_income$capital_gain == 0) 
+mean(adult_income$capital_loss == 0)
+mean(adult_income$native_country == "United-States")
+```
+
+I can observe that above 90% adult have zero capital_gain and capital_loss, and about 90% adult come from united states. Therefore,these three variables are skew. so I decide to delete them.
+regarding to education, it means same as education_num, and relationship is same as marital status. Fnlwgt is not related to our goal. So I delete education, relationship, and fnlwgt. So far, I finish the dimension reducing.
+
+```{r head, echo = FALSE}
+adult <- adult_income %>% select(-education, -fnlwgt, -relationship, -capital_gain, -capital_loss, -native_country )
+
+head(adult)
+  
+```
+## Clean dataset
+
+### Trim workclass column
+
+```{r head2, echo = FALSE}
+table(adult$workclass)
+  
+```
+
+The above summary of the subset shows that the variable of workclass has too many levels. I found 'Never-worked' and 'Without-pay' have a few data so I combine them to self-employed;
+combine federal-gov, state-gov, and local-gov levels to government. 
+combine self-emp-inc and self-emp-not-inc to self-employed.
+
+```{r summary, echo = FALSE}
+levels(adult$workclass)[1] <- "Unknown"
+levels(adult$workclass)[c(4, 6, 7, 9)] <- "Self_Employed"
+levels(adult$workclass)[c(2, 3, 6)] <- "Government"
+table(adult$workclass)
+```
+
+### Trim occupation column
+
+```{r head3, echo = FALSE}
+table(adult$occupation)
+  
+```
+There are too many levels here, but I can block the occupation into several groups:Blue-Collar, Professional, Sales, Service, and  White-Collar.
+
+```{r head4, echo = FALSE}
+levels(adult$occupation)[c(2, 5)] <- "White_Collar"
+levels(adult$occupation)[c(4, 5, 6, 7, 14 )] <- "Blue_Collar"
+levels(adult$occupation)[c(5, 6, 8 )] <- "Service"
+levels(adult$occupation)[c(3, 6, 8)] <- "Professional"
+levels(adult$occupation)[1] <- "Unknown"
+table(adult$occupation)
+  
+```
+
+### Trim marital_status column
+
+```{r head5, echo = FALSE}
+table(adult$marital_status)
+  
+```
+
+Block the marital_status into Divorced, married, seperated, single, and widowed.
+
+```{r head6, echo = FALSE}
+levels(adult$marital_status)[c(2, 3, 4)] <- "Married"
+levels(adult$marital_status)[3] <- "Single"
+levels(adult$marital_status)[c(1, 4)] <- "Bad married"
+```
+
+```{r}
+table(adult$marital_status)
+```
+
+So far, I complete the data preprocess.
+\pagebreak
+
+
+# Methods and Analysis
+
+
+## Data Analysis 
+
+Explore the variables can help us to understand this dataset. 
+
+### Explore age and education number
+
+```{r}
+adult %>% ggplot(aes(age, education_num, color = income)) + geom_point()
+```
+by contrast of age, education number is more related to adult's income. The high education they have, the more money they make.
+
+### Explore education number and hours per week
+
+```{r}
+adult %>% ggplot(aes(education_num, hours_per_week, color = income)) + geom_point()
+```
+Those people who work more hours and have high education can make more money.
+
+### Explore workclass
+
+```{r}
+adult %>% group_by(workclass, income) %>% summarize(n = n()) %>% ggplot(aes(workclass, n, fill = income)) + geom_bar(stat = "identity")
+```
+From the figure, those who are self employed have the highest tendency of making greater than $50,000 a year.
+
+### Explore occupation
+
+```{r}
+adult %>% group_by(occupation, income) %>% summarize(n = n()) %>% ggplot(aes(occupation, n, fill = income)) + geom_bar(stat = "identity")
+```
+Nearly half of Professional occupation makes greater than $50,000 a year, while that percentage is only 13% for Service occupation.
+
+### Explore marital_status 
+
+```{r}
+adult %>% group_by(marital_status, income) %>% summarize(n = n()) %>% ggplot(aes(marital_status, n, fill = income)) + geom_bar(stat = "identity")
+```
+For those who are married, nearly half of them are making greater than $50,000 a year.
+
+### Explore race 
+
+```{r}
+adult %>% group_by(race, income) %>% summarize(n = n()) %>% ggplot(aes(race, n, fill = income)) + geom_bar(stat = "identity")
+```
+White and Asian-Pacific Islander have high earning potentials.
+
+### Explore age
+
+```{r}
+adult %>% group_by(age, income) %>% summarize(n = n()) %>% ggplot(aes(age, n, fill = income)) + geom_bar(stat = "identity")
+```
+Those people at age between 50 to 60 have the highest tendency of making greater than $50,000 a year.
+
+### Explore sex
+
+```{r}
+adult %>% group_by(sex, income) %>% summarize(n = n()) %>% ggplot(aes(sex, n, fill = income)) + geom_bar(stat = "identity")
+```
+Male adult is easier to make greater than $50,000 a year.
+
+
+## Modelling Approach
+
+### create train_set and test_set 
+
+```{r}
+set.seed(1)
+
+test_index <- createDataPartition(y = adult$age, times = 1, p = 0.2, list = FALSE)
+train_set <- adult[-test_index,]
+test_set <- adult[test_index,]
+```
+
+### Logistic regression
+
+```{r}
+fit_glm <- train(income ~ ., method = "glm", data = train_set) 
+y_hat_glm <- predict(fit_glm, test_set)
+Accuracy_glm <- confusionMatrix(y_hat_glm, test_set$income)$overall["Accuracy"]
+Accuracy_results <- tibble(method = "logistic regression", Accuracy = Accuracy_glm)
+print.data.frame(Accuracy_results)
+```
+
+
+### Random forest classification
+
+```{r}
+set.seed(1)
+my_control <- trainControl(method = "cv", number = 5)
+fit_rf <- train(y = train_set[,9], x =train_set[,-9], method = "rf", ntree = 1000, trControl = my_control, allowParallel = TRUE)
+y_hat_rf <- predict(fit_rf, test_set)
+Accuracy_rf <- confusionMatrix(y_hat_rf, test_set$income)$overall["Accuracy"]
+Accuracy_results <- bind_rows(Accuracy_results,
+                          tibble(method="Random forest",  
+                                     Accuracy = Accuracy_rf))
+```
+
+
+
+# Results
+
+The Accuracy values are the following:
+
+```{r rmse_results3, echo = FALSE}
+print.data.frame(Accuracy_results) 
+```
+
+We therefore found the better method is random forest.
+
+# Discussion
+
+We can see the variables of workclass, marital_status are categories. So the classification model is better then regression.
+```{r}
+dim(adult)
+```
+
+Taking about the random forest, due to the high dimension which is 10 of columns and 32561 of rows, it spends a lot of time on processing. I can't do more research. for example I would should have research optimized the parameters such as 'mtry' and 'ntree'. I probably didn't have the best model.
+
+
+# Conclusion
+
+According to the model, sometimes we can adjust an adult's income just by his race, workclass, marital status, occupation, education, etc.
+Because of the category variables, the regression is not good at it. On contrast, the classification method performs better.
+
+
+\pagebreak
